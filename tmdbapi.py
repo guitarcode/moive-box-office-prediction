@@ -2,6 +2,7 @@ import requests
 import pandas as pd
 import auth
 import numpy as np
+from sqlalchemy import create_engine
 
 
 class Movie:
@@ -15,21 +16,25 @@ class Movie:
 
             response = requests.get(url, self.headers)
             json_response = response.json()
+
             for movie in json_response['results']:
                 # 개봉연도가 2010년 이후인 영화만 저장
                 if movie['release_date'][:4] >= '2010':
-                    # genre_ids를 이용하여 genre 컬럼 생성
                     genre_ids = movie['genre_ids']
-                    genre_columns = [genre['name'] for genre in self.genres if genre['id'] in genre_ids]
-                    genre_values = [1 if genre in genre_columns else 0 for genre in self.genres]
+                    genre_columns = [genre['name'] for genre in self.genres]
+                    genre_values = {genre: 0 for genre in genre_columns}
 
-                    # 데이터 추가
+                    for genre_id in genre_ids:
+                        genre_name = next((genre['name'] for genre in self.genres if genre['id'] == genre_id), None)
+                        if genre_name:
+                            genre_values[genre_name] = 1
+
                     data.append({
                         'id': movie['id'],
                         'original_title': movie['original_title'],
                         'title': movie['title'],
                         'release_date': movie['release_date'],
-                        **dict(zip(genre_columns, genre_values))
+                        **genre_values
                     })
 
             df = pd.DataFrame(data)
@@ -88,6 +93,8 @@ class Movie:
     def make_movie_data_frame(self):
         self.__get_popular_movie()
         self.__get_movie_detail()
+
+    def make_actor_data_frame(self):
         self.__get_movie_credits()
 
     def __init__(self):
@@ -116,9 +123,32 @@ class Movie:
         self.movie_data_frame_columns = ['id', 'original_title', 'title', 'release_date', 'Action', 'Crime',
                                          'Thriller', 'Adventure', 'Animation', 'Comedy', 'Family', 'Fantasy',
                                          'Science Fiction', 'Horror', 'Romance', 'Drama', 'Mystery', 'War',
-                                         'adult', 'revenue', 'overview', 'actor_id1', 'popularity1', 'actor_id2',
-                                         'popularity2', 'actor_id3', 'popularity3']
+                                         'adult', 'revenue', 'overview', 'actor_id1', 'actor_id2', 'actor_id3']
         self.movie_df = pd.DataFrame(columns=self.movie_data_frame_columns)
 
         self.actor_data_frame_columns = ['id', 'popularity', 'name']
         self.actor_df = pd.DataFrame(columns=self.actor_data_frame_columns)
+
+
+class MovieDB:
+
+    def __init__(self):
+        # 데이터베이스 연결 설정
+        self.host = 'localhost'
+        self.database = 'big_data_movie'
+        self.user = 'root'
+        self.password = 'root'
+        self.port = '3306'
+        self.engine = create_engine(
+            f'mysql+pymysql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}')
+
+    def save_to_database(self, movie_df, actor_df):
+        movie_table_name = 'movies'
+        actor_table_name = 'actors'
+        # 데이터프레임을 데이터베이스 테이블로 저장
+        movie_df.to_sql(movie_table_name, con=self.engine, if_exists='replace', index=False)
+        actor_df.to_sql(actor_table_name, con=self.engine, if_exists='replace', index=False)
+
+    def close_connection(self):
+        # 데이터베이스 연결 종료
+        self.engine.dispose()
